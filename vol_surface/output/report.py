@@ -1,0 +1,136 @@
+"""Generate calibration_report.md from calibration results."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from pathlib import Path
+
+from vol_surface.data.schema import VolSurface
+
+
+def generate_report(
+    surface: VolSurface,
+    diagnostics: dict,
+    confidence_intervals: dict[str, dict[str, tuple[float, float]]] | None = None,
+) -> str:
+    """Render a Markdown calibration report."""
+    lines: list[str] = []
+    _header(lines, surface)
+    _per_slice_table(lines, surface, diagnostics)
+    _ssvi_section(lines, surface, diagnostics, confidence_intervals)
+    _arbitrage_section(lines, surface)
+    _footer(lines)
+    return "\n".join(lines)
+
+
+def save_report(
+    surface: VolSurface,
+    diagnostics: dict,
+    path: str | Path,
+    confidence_intervals: dict | None = None,
+) -> Path:
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    md = generate_report(surface, diagnostics, confidence_intervals)
+    p.write_text(md)
+    return p
+
+
+def _header(lines: list[str], surface: VolSurface) -> None:
+    lines.append("# Volatility Surface Calibration Report")
+    lines.append("")
+    lines.append(f"- **Timestamp:** {surface.timestamp}")
+    lines.append(f"- **Ticker:** {surface.ticker}")
+    lines.append(f"- **Spot:** {surface.spot:.2f}")
+    lines.append(f"- **Maturities calibrated:** {len(surface.maturities)}")
+    lines.append("")
+
+
+def _per_slice_table(lines: list[str], surface: VolSurface, diagnostics: dict) -> None:
+    lines.append("## Per-Slice SVI Calibration")
+    lines.append("")
+    lines.append("| Expiry | T (yr) | # Strikes | RMSE (tvar) | RMSE (IV) | a | b | rho | m | sigma | Status |")
+    lines.append("|--------|--------|-----------|-------------|-----------|---|---|-----|---|-------|--------|")
+
+    per_slice = diagnostics.get("per_slice", [])
+    for entry in per_slice:
+        expiry = entry.get("expiry", "")
+        T = entry.get("T", 0)
+        n = entry.get("n_strikes", 0)
+        rmse_t = entry.get("svi_rmse_tvar")
+        rmse_iv = entry.get("svi_rmse_iv")
+        status = entry.get("status", "ok")
+        p = entry.get("svi_params", {})
+
+        rmse_t_s = f"{rmse_t:.6f}" if rmse_t is not None else "—"
+        rmse_iv_s = f"{rmse_iv:.4f}" if rmse_iv is not None else "—"
+        a_s = f"{p.get('a', 0):.6f}" if p else "—"
+        b_s = f"{p.get('b', 0):.6f}" if p else "—"
+        rho_s = f"{p.get('rho', 0):.4f}" if p else "—"
+        m_s = f"{p.get('m', 0):.4f}" if p else "—"
+        sig_s = f"{p.get('sigma', 0):.4f}" if p else "—"
+
+        lines.append(
+            f"| {expiry} | {T:.4f} | {n} | {rmse_t_s} | {rmse_iv_s} | "
+            f"{a_s} | {b_s} | {rho_s} | {m_s} | {sig_s} | {status} |"
+        )
+    lines.append("")
+
+
+def _ssvi_section(
+    lines: list[str],
+    surface: VolSurface,
+    diagnostics: dict,
+    confidence_intervals: dict | None,
+) -> None:
+    lines.append("## SSVI Surface Calibration")
+    lines.append("")
+
+    surf_diag = diagnostics.get("surface", {})
+    ssvi_p = surf_diag.get("ssvi_params")
+    ssvi_rmse = surf_diag.get("ssvi_rmse_tvar")
+
+    if ssvi_p:
+        lines.append(f"- **rho:** {ssvi_p.get('rho', 0):.6f}")
+        lines.append(f"- **eta:** {ssvi_p.get('eta', 0):.6f}")
+        lines.append(f"- **gamma:** {ssvi_p.get('gamma', 0):.6f}")
+    else:
+        lines.append("*SSVI calibration not performed or failed.*")
+
+    if ssvi_rmse is not None:
+        lines.append(f"- **Surface RMSE (tvar):** {ssvi_rmse:.6f}")
+    lines.append("")
+
+    if confidence_intervals:
+        lines.append("### 95% Confidence Intervals")
+        lines.append("")
+        lines.append("| Parameter | Estimate | Lower | Upper |")
+        lines.append("|-----------|----------|-------|-------|")
+        for group_name, ci_dict in confidence_intervals.items():
+            for param, (lo, hi) in ci_dict.items():
+                est = ssvi_p.get(param, "—") if ssvi_p and group_name == "ssvi" else "—"
+                est_s = f"{est:.6f}" if isinstance(est, (int, float)) else est
+                lo_s = f"{lo:.6f}" if lo != float("-inf") else "—"
+                hi_s = f"{hi:.6f}" if hi != float("inf") else "—"
+                lines.append(f"| {group_name}.{param} | {est_s} | {lo_s} | {hi_s} |")
+        lines.append("")
+
+
+def _arbitrage_section(lines: list[str], surface: VolSurface) -> None:
+    lines.append("## Arbitrage Violations")
+    lines.append("")
+    if not surface.arbitrage_violations:
+        lines.append("No arbitrage violations detected.")
+    else:
+        lines.append(f"**{len(surface.arbitrage_violations)} violation(s) detected:**")
+        lines.append("")
+        lines.append("| Type | Maturity | Strike | Severity |")
+        lines.append("|------|----------|--------|----------|")
+        for v in surface.arbitrage_violations:
+            lines.append(f"| {v.type} | {v.maturity} | {v.strike:.2f} | {v.severity:.6f} |")
+    lines.append("")
+
+
+def _footer(lines: list[str]) -> None:
+    lines.append("---")
+    lines.append(f"*Generated by vol_surface v0.1.0 at {datetime.utcnow().isoformat()}*")
