@@ -14,6 +14,12 @@ logger = logging.getLogger(__name__)
 MIN_STRIKES = 5
 MONEYNESS_BAND = 0.5  # |log(K/F)| < 0.5
 
+# Long-dated slices lose liquidity quickly; apply stricter outlier filtering.
+_LONG_DATED_T = 1.5
+_N_SIGMA_NORMAL = 3.0
+_N_SIGMA_LONG = 2.5
+_MAX_SPREAD_FRAC = 0.50  # drop quotes where (ask-bid)/mid > 50%
+
 
 def clean_chain(
     chain: OptionChain,
@@ -47,6 +53,9 @@ def clean_chain(
         filtered = _filter_quotes(
             expiry_quotes, forward, moneyness_band, use_otm
         )
+        # Fix 1: remove IV outliers before fitting.  Far-OTM stale quotes
+        # at long maturities cause the optimizer to chase impossible IVs.
+        filtered = _filter_iv_outliers(filtered, T)
         if len(filtered) < min_strikes:
             logger.warning(
                 "Expiry %s: only %d clean strikes (need %d), skipping",
@@ -127,6 +136,45 @@ def _filter_quotes(quotes, forward, moneyness_band, use_otm):
                 seen[q.strike] = q
                 deduped[deduped.index(existing)] = q  # type: ignore[arg-type]
     return deduped
+
+
+def _filter_iv_outliers(quotes: list, T: float) -> list:
+    """Remove IV outliers and illiquid quotes before SVI fitting.
+
+    Uses robust statistics (MAD-based sigma) so a single bad quote does not
+    corrupt the scale estimate.  Long-dated slices (T > 1.5yr) get a stricter
+    n_sigma threshold because liquidity drops sharply and stale quotes are
+    common.  Quotes with very wide bid-ask spreads are also removed.
+    """
+    if len(quotes) < 3:
+        return quotes
+
+    ivs = np.array([q.implied_vol for q in quotes], dtype=float)
+    med = float(np.median(ivs))
+    mad = float(np.median(np.abs(ivs - med)))
+    robust_std = mad * 1.4826  # consistent estimator of std from MAD
+
+    n_sigma = _N_SIGMA_LONG if T > _LONG_DATED_T else _N_SIGMA_NORMAL
+
+    out = []
+    for q, iv in zip(quotes, ivs):
+        # Outlier IV: more than n_sigma robust-std from slice median
+        if robust_std > 1e-6 and abs(iv - med) > n_sigma * robust_std:
+            logger.debug(
+                "Dropping IV outlier K=%.1f iv=%.3f (med=%.3f, n_sigma=%.1f)",
+                q.strike, iv, med, n_sigma,
+            )
+            continue
+        # Wide bid-ask: likely illiquid / stale quote
+        if q.mid > 1e-8 and (q.ask - q.bid) / q.mid > _MAX_SPREAD_FRAC:
+            logger.debug(
+                "Dropping wide-spread quote K=%.1f spread/mid=%.2f",
+                q.strike, (q.ask - q.bid) / q.mid,
+            )
+            continue
+        out.append(q)
+
+    return out if len(out) >= 3 else quotes  # never drop below 3 before min check
 
 
 def _compute_weights(quotes) -> list[float]:
