@@ -42,6 +42,42 @@ def svi_implied_vol(
     return np.sqrt(w / T)
 
 
+def svi_butterfly_g(
+    k: NDArray[np.float64],
+    a: float,
+    b: float,
+    rho: float,
+    m: float,
+    sigma: float,
+) -> NDArray[np.float64]:
+    """Gatheral (2006) butterfly density g(k).
+
+    g(k) >= 0 everywhere is necessary and sufficient for the SVI smile to be
+    free of butterfly arbitrage.  Negative g(k) means the implied risk-neutral
+    density has gone negative (static arbitrage).
+
+    Formula: g(k) = (1 - k*w'/(2w))^2 - (w'^2/4)*(1/w + 1/4) + w''/2
+
+    Adapted from the reference implementation in Stat_app_bofa/SVI-SSVI/svi.py
+    (butterfly_constraint).  Derivatives are computed analytically for speed
+    and numerical stability.
+    """
+    km = k - m
+    sqrt_disc = np.sqrt(km**2 + sigma**2)
+    w = a + b * (rho * km + sqrt_disc)
+    w_safe = np.maximum(w, 1e-10)
+
+    # Analytical first and second derivatives of SVI w.r.t. k
+    w_prime = b * (rho + km / sqrt_disc)
+    w_double_prime = b * sigma**2 / sqrt_disc**3
+
+    term1 = (1.0 - k * w_prime / (2.0 * w_safe)) ** 2
+    term2 = (w_prime**2 / 4.0) * (1.0 / w_safe + 0.25)
+    term3 = w_double_prime / 2.0
+
+    return term1 - term2 + term3
+
+
 def svi_from_params(params: SVIParams) -> dict[str, float]:
     return dict(a=params.a, b=params.b, rho=params.rho, m=params.m, sigma=params.sigma)
 
@@ -56,20 +92,45 @@ def vector_to_params(x: NDArray[np.float64]) -> SVIParams:
 
 
 def svi_initial_guess(
-    k: NDArray[np.float64], w: NDArray[np.float64]
+    k: NDArray[np.float64],
+    w: NDArray[np.float64],
+    T: float = 1.0,
+    prior: NDArray[np.float64] | None = None,
 ) -> NDArray[np.float64]:
-    """Heuristic initial guess for SVI parameters from data."""
-    w_atm = float(np.interp(0.0, k, w))
-    a = max(w_atm * 0.8, 1e-4)
-    b = max(float(np.std(w) / (np.std(k) + 1e-8)), 1e-4)
-    rho = 0.0
-    m = 0.0
-    sigma = max(float(np.std(k) * 0.5), 1e-3)
-    return np.array([a, b, rho, m, sigma])
+    """Maturity-aware initial guess for SVI parameters.
+
+    Fix 3: instead of a single generic starting point for every slice, use
+    maturity buckets that reflect typical equity-smile shapes at different
+    tenors.  If a prior calibration result is provided (warm start), use
+    those params directly so sequential slices initialise from their neighbour.
+    """
+    if prior is not None:
+        return prior.copy()
+
+    # Scale the 'a' component to the actual ATM total variance so the starting
+    # point is in the right order of magnitude regardless of maturity.
+    w_atm = max(float(np.interp(0.0, k, w)), 1e-4)
+
+    if T < 0.5:
+        # Short-dated: steep skew, tight curvature
+        return np.array([w_atm * 0.9, 0.40, -0.70, 0.0, 0.10])
+    elif T < 1.5:
+        # Medium-dated: moderate skew and curvature
+        return np.array([w_atm * 0.9, 0.20, -0.50, 0.0, 0.20])
+    else:
+        # Long-dated: shallow skew, broader curvature — keep b small to
+        # avoid the b→upper-bound explosion seen in stale long-tenor quotes.
+        return np.array([w_atm * 0.9, 0.10, -0.30, 0.0, 0.30])
 
 
 def svi_parameter_bounds() -> tuple[list[float], list[float]]:
-    """Return (lower, upper) bounds for [a, b, rho, m, sigma]."""
-    lower = [-0.5, 1e-8, -0.999, -2.0, 1e-6]
-    upper = [2.0, 5.0, 0.999, 2.0, 5.0]
+    """Return (lower, upper) bounds for [a, b, rho, m, sigma].
+
+    Fix 2 changes vs. original:
+    - b upper bound: 5.0 → 2.0  (no realistic equity smile needs b > 2)
+    - sigma lower bound: 1e-6 → 1e-3  (prevents the V-shape degeneration
+      where sigma → 0 makes the SVI a kinked function, breaking butterfly)
+    """
+    lower = [-0.5, 1e-8, -0.999, -2.0, 1e-3]
+    upper = [2.0,  2.0,   0.999,  2.0, 5.0]
     return lower, upper
