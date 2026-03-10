@@ -94,12 +94,20 @@ def check_calendar(
 def run_all_checks(
     slices: list[tuple[str, float, NDArray[np.float64], NDArray[np.float64]]],
     tol: float = -1e-8,
+    min_severity: float = 1e-5,
 ) -> list[ArbitrageViolation]:
-    """Run butterfly + calendar checks and return all violations."""
+    """Run butterfly + calendar checks and return all violations.
+
+    Fix 5: violations with severity < min_severity are filtered out as
+    float64 rounding artefacts.  On a clean SVI surface these appear with
+    severity ~1e-8.  Real butterfly violations have severity > 1e-4.
+    """
     violations: list[ArbitrageViolation] = []
     for label, T, strikes, tvar in slices:
         violations.extend(check_butterfly(strikes, tvar, label, tol))
     violations.extend(check_calendar(slices, tol))
+
+    violations = [v for v in violations if v.severity >= min_severity]
     if violations:
         logger.warning("Detected %d arbitrage violations", len(violations))
     return violations

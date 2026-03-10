@@ -65,9 +65,17 @@ def ssvi_initial_guess() -> NDArray[np.float64]:
 
 
 def ssvi_parameter_bounds() -> tuple[list[float], list[float]]:
-    """Return (lower, upper) bounds for [rho, eta, gamma]."""
-    lower = [-0.999, 1e-4, 1e-4]
-    upper = [0.999, 4.0, 1.0]
+    """Return (lower, upper) bounds for [rho, eta, gamma].
+
+    Fix 6: equity-specific hard bounds.
+    - rho: restricted to (-0.95, 0.0) — equity skew is always negative.
+    - eta: (0.05, 1.5) — prevents near-zero (flat surface) and explosions.
+    - gamma: (0.1, 0.9) — keeps the power-law decay well-conditioned.
+    These are strictly inside the mathematical no-arb region
+    (eta*(1+|rho|) <= 4), so the Pydantic validator is never triggered.
+    """
+    lower = [-0.95, 0.05, 0.10]
+    upper = [0.00,  1.50, 0.90]
     return lower, upper
 
 
