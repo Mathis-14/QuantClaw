@@ -36,22 +36,29 @@ def _make_svi_slice(
 
 
 class TestSVIRoundTrip:
-    """Generate -> noise -> calibrate -> recover for SVI."""
+    """Generate -> noise -> calibrate -> check curve recovery for SVI.
+
+    SVI is NOT globally identifiable: different parameter vectors can produce
+    the same smile.  We therefore test that the *fitted curve* reproduces the
+    generated curve, not that the specific parameter values are recovered.
+    """
 
     @pytest.mark.parametrize("noise_std", [0.0, 0.0005, 0.001])
-    def test_param_recovery(self, noise_std: float):
+    def test_curve_recovery(self, noise_std: float):
+        from vol_surface.calibration.diagnostics import svi_slice_rmse
+
         true_params = SVIParams(a=0.04, b=0.15, rho=-0.25, m=0.01, sigma=0.15)
         vol_slice = _make_svi_slice(true_params, T=0.25, noise_std=noise_std)
 
         recovered, opt = calibrate_svi_slice(vol_slice)
         assert recovered is not None
 
-        tol = 0.02 + noise_std * 100  # tolerance scales with noise
-        assert abs(recovered.a - true_params.a) < tol
-        assert abs(recovered.b - true_params.b) < tol
-        assert abs(recovered.rho - true_params.rho) < tol * 3
-        assert abs(recovered.m - true_params.m) < tol * 2
-        assert abs(recovered.sigma - true_params.sigma) < tol * 2
+        # Curve fit quality: RMSE of total variance must be <= noise level
+        rmse = svi_slice_rmse(vol_slice, recovered)
+        max_rmse = max(1e-6, noise_std * 5)  # scale tolerance with noise
+        assert rmse < max_rmse, f"RMSE {rmse:.2e} > tolerance {max_rmse:.2e}"
+        # No static arbitrage in the fitted curve
+        assert recovered.no_arb_lower_bound() >= -1e-8
 
 
 class TestSSVIRoundTrip:
