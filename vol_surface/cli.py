@@ -18,7 +18,7 @@ from vol_surface.calibration.diagnostics import (
 )
 from vol_surface.calibration.optimizer import calibrate_ssvi_surface, calibrate_svi_slice
 from vol_surface.data.cleaner import clean_chain
-from vol_surface.data.fetcher import YFinanceFetcher
+from vol_surface.data.fetcher import YFinanceFetcher, resolve_tickers
 from vol_surface.data.schema import (
     ArbitrageViolation,
     SSVIParams,
@@ -41,9 +41,13 @@ logger = logging.getLogger(__name__)
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="vol_surface",
-        description="Calibrate SPX volatility surface (SVI + SSVI)",
+        description="Calibrate equity index volatility surface (SVI + SSVI)",
     )
-    p.add_argument("--ticker", default="SPY", help="Underlying ticker (default: SPY)")
+    p.add_argument(
+        "--ticker",
+        default="SPY",
+        help="Underlying ticker (SPX, SPY, NDX, QQQ; default: SPY)",
+    )
     p.add_argument("--output", default="./output", help="Output directory")
     p.add_argument("--min-strikes", type=int, default=5, help="Minimum strikes per slice")
     p.add_argument("--moneyness-band", type=float, default=0.5, help="|log(K/F)| cutoff")
@@ -142,10 +146,14 @@ def main(argv: list[str] | None = None) -> int:
             logger.warning("  %s at %s K=%.2f severity=%.6f", v.type, v.maturity, v.strike, v.severity)
 
     # Build output
+    spot_source, options_source = resolve_tickers(args.ticker)
+
     vol_surface = VolSurface(
         timestamp=datetime.utcnow().isoformat(),
         ticker=args.ticker,
         spot=chain.spot,
+        spot_source=spot_source,
+        options_source=options_source,
         maturities=slice_results,
         ssvi_params=ssvi_params,
         surface_rmse=surface_rmse_val,

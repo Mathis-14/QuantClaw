@@ -133,6 +133,8 @@ class VolSurface(BaseModel):
     timestamp: str
     ticker: str
     spot: float
+    spot_source: str | None = None
+    options_source: str | None = None
     maturities: list[SliceResult]
     ssvi_params: SSVIParams | None = None
     surface_rmse: float | None = None
