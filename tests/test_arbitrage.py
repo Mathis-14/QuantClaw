@@ -1,98 +1,83 @@
-"""Tests for butterfly and calendar arbitrage checks on synthetic data."""
+"""
+Tests for arbitrage checks.
 
-from __future__ import annotations
+Run with:
+    python -m pytest tests/test_arbitrage.py -v
+"""
 
-import numpy as np
+import pandas as pd
 import pytest
-
-from vol_surface.models.arbitrage import check_butterfly, check_calendar, run_all_checks
-
-
-class TestButterflyArbitrage:
-    """Butterfly (convexity) checks."""
-
-    def test_convex_surface_no_violations(self):
-        """A convex total-variance curve should have zero violations."""
-        strikes = np.linspace(90, 110, 21)
-        # Parabolic (convex) total variance
-        tvar = 0.04 + 0.001 * (strikes - 100) ** 2
-        violations = check_butterfly(strikes, tvar, "2025-06-20")
-        assert len(violations) == 0
-
-    def test_concavity_detected(self):
-        """Introduce a concave dip and verify detection."""
-        strikes = np.linspace(90, 110, 21)
-        tvar = 0.04 + 0.001 * (strikes - 100) ** 2
-        # Create a concave region by pushing the middle down
-        tvar[10] -= 0.05
-        violations = check_butterfly(strikes, tvar, "2025-06-20")
-        assert len(violations) > 0
-        assert all(v.type == "butterfly" for v in violations)
-
-    def test_too_few_strikes(self):
-        """Less than 3 strikes: can't check, return empty."""
-        strikes = np.array([100.0, 105.0])
-        tvar = np.array([0.04, 0.045])
-        violations = check_butterfly(strikes, tvar, "2025-06-20")
-        assert len(violations) == 0
+from src.arbitrage import (
+    ArbitrageViolationWarning,
+    butterfly_check,
+    calendar_spread_check,
+    compute_density,
+    check_arbitrage,
+)
 
 
-class TestCalendarArbitrage:
-    """Calendar spread (monotonicity in T) checks."""
-
-    def test_monotone_no_violations(self):
-        """Total variance increasing in T should have zero violations."""
-        strikes = np.linspace(90, 110, 11)
-        slices = [
-            ("2025-03-20", 0.1, strikes, 0.01 * np.ones_like(strikes)),
-            ("2025-06-20", 0.25, strikes, 0.025 * np.ones_like(strikes)),
-            ("2025-12-20", 0.75, strikes, 0.06 * np.ones_like(strikes)),
-        ]
-        violations = check_calendar(slices)
-        assert len(violations) == 0
-
-    def test_inversion_detected(self):
-        """Later maturity with lower total variance should be flagged."""
-        strikes = np.linspace(90, 110, 11)
-        slices = [
-            ("2025-03-20", 0.1, strikes, 0.04 * np.ones_like(strikes)),
-            ("2025-06-20", 0.25, strikes, 0.02 * np.ones_like(strikes)),  # inverted!
-        ]
-        violations = check_calendar(slices)
-        assert len(violations) > 0
-        assert all(v.type == "calendar" for v in violations)
-
-    def test_single_slice_no_check(self):
-        strikes = np.array([100.0])
-        slices = [("2025-06-20", 0.25, strikes, np.array([0.04]))]
-        violations = check_calendar(slices)
-        assert len(violations) == 0
+@pytest.fixture
+def sample_df():
+    """Fixture for a sample volatility surface DataFrame."""
+    data = {
+        "expiry_date": [
+            pd.Timestamp("2026-06-26"), pd.Timestamp("2026-06-26"), 
+            pd.Timestamp("2026-09-25"), pd.Timestamp("2026-09-25"),
+        ],
+        "strike": [50000.0, 52000.0, 50000.0, 52000.0],
+        "total_variance": [0.05, 0.045, 0.04, 0.035],  # Calendar arbitrage: 0.04 < 0.05
+        "forward_price": [52000.0, 52000.0, 52000.0, 52000.0],
+    }
+    return pd.DataFrame(data)
 
 
-class TestRunAllChecks:
-    """Integration: combined butterfly + calendar."""
+def test_calendar_spread_check(sample_df):
+    """Test calendar spread check detects violations."""
+    violations = calendar_spread_check(sample_df)
+    assert len(violations) == 2
+    assert all(v.violation_type == "calendar" for v in violations)
+    assert {v.strike for v in violations} == {50000.0, 52000.0}
+    assert all(v.severity > 0 for v in violations)
 
-    def test_clean_surface(self):
-        strikes = np.linspace(90, 110, 15)
-        tvar1 = 0.02 + 0.001 * (strikes - 100) ** 2
-        tvar2 = 0.05 + 0.001 * (strikes - 100) ** 2
-        slices = [
-            ("2025-03-20", 0.1, strikes, tvar1),
-            ("2025-06-20", 0.25, strikes, tvar2),
-        ]
-        violations = run_all_checks(slices)
-        assert len(violations) == 0
 
-    def test_violations_from_both(self):
-        strikes = np.linspace(90, 110, 15)
-        tvar1 = 0.05 + 0.001 * (strikes - 100) ** 2
-        tvar1[7] -= 0.1  # butterfly violation
-        tvar2 = 0.02 + 0.001 * (strikes - 100) ** 2  # calendar inversion
-        slices = [
-            ("2025-03-20", 0.1, strikes, tvar1),
-            ("2025-06-20", 0.25, strikes, tvar2),
-        ]
-        violations = run_all_checks(slices)
-        types = {v.type for v in violations}
-        assert "butterfly" in types
-        assert "calendar" in types
+def test_butterfly_check(sample_df):
+    """Test butterfly check detects violations."""
+    # Add density column (manually computed for test)
+    sample_df["density"] = [1.0, 0.9, 1.0, -0.1]  # Butterfly arbitrage: -0.1 < 0
+    violations = butterfly_check(sample_df)
+    assert len(violations) == 1
+    assert violations[0].violation_type == "butterfly"
+    assert violations[0].strike == 52000.0
+    assert violations[0].severity > 0
+
+
+def test_compute_density(sample_df):
+    """Test density computation."""
+    df_with_density = compute_density(sample_df)
+    assert "density" in df_with_density.columns
+    assert not df_with_density["density"].isna().any()
+
+
+def test_check_arbitrage(sample_df):
+    """Test full arbitrage check."""
+    print("Test DataFrame columns:", sample_df.columns)
+    violations = check_arbitrage(sample_df)
+    assert len(violations) == 1  # Only calendar violation (butterfly requires density)
+
+
+def test_no_arbitrage():
+    """Test no arbitrage case."""
+    data = {
+        "expiry_date": [
+            pd.Timestamp("2026-06-26"), pd.Timestamp("2026-06-26"), 
+            pd.Timestamp("2026-09-25"), pd.Timestamp("2026-09-25"),
+        ],
+        "strike": [50000.0, 52000.0, 50000.0, 52000.0],
+        "total_variance": [0.04, 0.045, 0.05, 0.055],  # No calendar arbitrage
+        "forward_price": [52000.0, 52000.0, 52000.0, 52000.0],
+    }
+    df = pd.DataFrame(data)
+    df = compute_density(df)
+    
+    violations = check_arbitrage(df)
+    assert len(violations) == 0
