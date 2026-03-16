@@ -1,4 +1,4 @@
-"""Build and plot SPY implied volatility surface."""
+"""Debug SPY implied volatility surface pipeline."""
 
 import os
 import numpy as np
@@ -17,7 +17,7 @@ MIN_DAYS = 7
 MAX_DAYS = 180
 RISK_FREE_RATE = 0.0
 OUTPUT_DIR = "/home/openclaw_daemon/.openclaw/workspace-engineer/projects/QuantClaw/exports/plots"
-OUTPUT_FILE = os.path.join(OUTPUT_DIR, "vol_surface.png")
+OUTPUT_FILE = os.path.join(OUTPUT_DIR, "vol_surface_debug.png")
 
 
 # Ensure output dir exists
@@ -57,6 +57,7 @@ def fetch_spy_option_chain() -> pd.DataFrame:
 def filter_chain(df: pd.DataFrame) -> pd.DataFrame:
     """Filter OTM options with positive bid."""
     spot = yf.Ticker(TICKER).fast_info.last_price
+    print(f"SPY spot price: {spot}")
     
     # Filter OTM calls and puts
     otm_calls = df[(df["option_type"] == "call") & (df["strike"] > spot)]
@@ -65,6 +66,7 @@ def filter_chain(df: pd.DataFrame) -> pd.DataFrame:
     
     # Filter positive bid
     otm = otm[otm["bid"] > 0]
+    print(f"Filtered {len(otm)} OTM options with positive bid.")
     
     return otm
 
@@ -83,7 +85,7 @@ def compute_implied_vols(df: pd.DataFrame) -> pd.DataFrame:
             r=RISK_FREE_RATE,
             option_type=row["option_type"],
         )
-        if iv is not None:
+        if iv is not None and not np.isnan(iv) and iv > 0:
             ivs.append({
                 "strike": row["strike"],
                 "expiry": row["expiry"],
@@ -92,34 +94,39 @@ def compute_implied_vols(df: pd.DataFrame) -> pd.DataFrame:
                 "implied_vol": iv,
             })
     
-    return pd.DataFrame(ivs)
+    iv_df = pd.DataFrame(ivs)
+    print(f"Computed {len(iv_df)} implied volatilities.")
+    print(f"IV stats: min={iv_df['implied_vol'].min():.4f}, max={iv_df['implied_vol'].max():.4f}, mean={iv_df['implied_vol'].mean():.4f}")
+    
+    return iv_df
 
 
 def build_surface_grid(iv_df: pd.DataFrame) -> tuple:
-    """Build grid for 3D surface plot."""
+    """Build grid for 3D surface plot with interpolation."""
+    from scipy.interpolate import griddata
+    
     # Unique strikes and expiries
     strikes = np.linspace(iv_df["moneyness"].min(), iv_df["moneyness"].max(), 50)
     expiries = np.linspace(iv_df["days_to_expiry"].min(), iv_df["days_to_expiry"].max(), 20)
     
     # Create grid
     strike_grid, expiry_grid = np.meshgrid(strikes, expiries)
-    vol_grid = np.full_like(strike_grid, np.nan)
     
-    # Fill grid (nearest neighbor)
-    for i, expiry in enumerate(expiries):
-        for j, strike in enumerate(strikes):
-            subset = iv_df[
-                (np.abs(iv_df["days_to_expiry"] - expiry) < 5) &
-                (np.abs(iv_df["moneyness"] - strike) < 0.02)
-            ]
-            if not subset.empty:
-                vol_grid[i, j] = subset["implied_vol"].mean()
+    # Interpolate
+    points = iv_df[["moneyness", "days_to_expiry"]].values
+    values = iv_df["implied_vol"].values
+    vol_grid = griddata(points, values, (strike_grid, expiry_grid), method="cubic", fill_value=np.nan)
+    
+    # Fill NaN with nearest
+    from scipy.interpolate import NearestNDInterpolator
+    nearest = NearestNDInterpolator(points, values)
+    vol_grid = np.where(np.isnan(vol_grid), nearest(strike_grid, expiry_grid), vol_grid)
     
     return strike_grid, expiry_grid, vol_grid
 
 
 def plot_surface(strike_grid: np.ndarray, expiry_grid: np.ndarray, vol_grid: np.ndarray) -> None:
-    """Plot 3D implied volatility surface."""
+    """Plot 3D implied volatility surface with improved styling."""
     fig = plt.figure(figsize=(12, 8))
     ax = fig.add_subplot(111, projection="3d")
     
@@ -130,13 +137,15 @@ def plot_surface(strike_grid: np.ndarray, expiry_grid: np.ndarray, vol_grid: np.
         cmap="viridis",
         edgecolor="none",
         alpha=0.8,
+        rstride=1,
+        cstride=1,
     )
     
-    ax.set_title("SPY Implied Volatility Surface")
-    ax.set_xlabel("Moneyness (K/S)")
-    ax.set_ylabel("Days to Expiry")
-    ax.set_zlabel("Implied Volatility")
-    fig.colorbar(surf, label="IV")
+    ax.set_title("SPY Implied Volatility Surface (Debug)", fontsize=16, pad=20)
+    ax.set_xlabel("Moneyness (K/S)", fontsize=12, labelpad=10)
+    ax.set_ylabel("Days to Expiry", fontsize=12, labelpad=10)
+    ax.set_zlabel("Implied Volatility", fontsize=12, labelpad=10)
+    fig.colorbar(surf, label="IV", pad=0.1)
     
     plt.savefig(OUTPUT_FILE, dpi=300, bbox_inches="tight")
     plt.close()
@@ -146,10 +155,12 @@ def main():
     """Main workflow."""
     print("Fetching SPY option chain...")
     chain = fetch_spy_option_chain()
+    print(f"Raw chain size: {len(chain)}")
     
     print("Filtering OTM options...")
     filtered = filter_chain(chain)
     filtered["mid"] = (filtered["bid"] + filtered["ask"]) / 2.0
+    print(f"Filtered chain size: {len(filtered)}")
     
     print("Computing implied volatilities...")
     iv_df = compute_implied_vols(filtered)
@@ -160,7 +171,7 @@ def main():
     print("Plotting surface...")
     plot_surface(strike_grid, expiry_grid, vol_grid)
     
-    print(f"Plot saved to {OUTPUT_FILE}")
+    print(f"Debug plot saved to {OUTPUT_FILE}")
 
 
 if __name__ == "__main__":
