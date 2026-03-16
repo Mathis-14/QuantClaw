@@ -36,9 +36,8 @@ async def fetch_instruments(currency: str) -> list[dict]:
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(url, params=params)
-                await response.aread()
                 response.raise_for_status()
-                return (await response.json())["result"]
+                return response.json()["result"]
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
                 delay = BASE_DELAY * (2 ** attempt) + random.uniform(0, 1)
@@ -59,9 +58,18 @@ async def fetch_ticker(instrument_name: str) -> Optional[dict]:
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(url, params=params)
-                await response.aread()
                 response.raise_for_status()
-                return (await response.json())["result"]
+                ticker = response.json()["result"]
+                
+                # Check for required fields
+                if "best_bid_price" not in ticker or "best_ask_price" not in ticker:
+                    logger.warning(f"Missing bid/ask for {instrument_name}")
+                    return None
+                
+                # Add implied_volatility (mark_iv) and underlying_price
+                ticker["implied_volatility"] = ticker.get("mark_iv")
+                ticker["underlying_price"] = ticker.get("underlying_price")
+                return ticker
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
                 delay = BASE_DELAY * (2 ** attempt) + random.uniform(0, 1)
@@ -82,20 +90,19 @@ async def process_instrument(
         logger.warning(f"No ticker data for {instrument['instrument_name']}")
         return None
     
-    if "bid_price" not in ticker or "ask_price" not in ticker:
-        logger.warning(f"Missing bid/ask for {instrument['instrument_name']}")
-        return None
+    # Map option_type (Deribit uses 'C'/'P')
+    option_type = "call" if instrument["option_type"] == "C" else "put"
     
     try:
         option = DeribitOption(
             instrument_name=instrument["instrument_name"],
             strike=instrument["strike"],
             expiry_date=datetime.fromtimestamp(instrument["expiration_timestamp"] / 1000, tz=timezone.utc),
-            option_type=instrument["option_type"],
-            bid=ticker["bid_price"],
-            ask=ticker["ask_price"],
-            underlying_price=underlying_price,
-            implied_volatility=ticker.get("greeks", {}).get("iv"),
+            option_type=option_type,
+            best_bid_price=ticker["best_bid_price"],
+            best_ask_price=ticker["best_ask_price"],
+            underlying_price=ticker["underlying_price"],
+            implied_volatility=ticker.get("implied_volatility"),
             funding_rate=ticker.get("funding_8h"),
             timestamp=datetime.now(timezone.utc),
         )
@@ -114,9 +121,8 @@ async def fetch_underlying_price(currency: str) -> float:
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(url, params=params)
-                await response.aread()
                 response.raise_for_status()
-                return (await response.json())["result"]["last_price"]
+                return response.json()["result"]["last_price"]
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
                 delay = BASE_DELAY * (2 ** attempt) + random.uniform(0, 1)
@@ -144,7 +150,8 @@ async def fetch_and_save_data(currency: str) -> None:
     for instrument in instruments:
         option = await process_instrument(instrument, currency, underlying_price)
         if option:
-            options.append(option)
+            ticker = await fetch_ticker(instrument["instrument_name"])
+            options.append((option, ticker))
     
     if not options:
         logger.error(f"No valid options for {currency}")
@@ -156,7 +163,14 @@ async def fetch_and_save_data(currency: str) -> None:
     output_dir.mkdir(exist_ok=True)
     output_path = output_dir / f"{currency.lower()}_options_{timestamp}.csv"
     
-    df = [option.model_dump() for option in options]
+    # Force include mark_iv (alias for implied_volatility)
+    df = []
+    for option, ticker in options:
+        data = option.model_dump(by_alias=True)
+        # Use raw mark_iv from API if available, else None
+        data["mark_iv"] = ticker.get("mark_iv")
+        df.append(data)
+    
     import pandas as pd
     pd.DataFrame(df).to_csv(output_path, index=False)
     logger.info(f"Saved {len(options)} {currency} options to {output_path}")
@@ -166,4 +180,3 @@ if __name__ == "__main__":
     import asyncio
     
     asyncio.run(fetch_and_save_data("BTC"))
-    asyncio.run(fetch_and_save_data("ETH"))
