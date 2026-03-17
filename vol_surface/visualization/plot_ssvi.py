@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Dict, List, Tuple
+from matplotlib.axes import Axes
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -93,7 +95,7 @@ def plot_ssvi_surface_3d(
 
 
 def plot_total_variance_monotonicity(
-    ax: plt.Axes,
+    ax: Axes,
     k_grid: np.ndarray,
     T_grid: np.ndarray,
     params: SSVIParams,
@@ -128,7 +130,7 @@ def plot_total_variance_monotonicity(
 
 
 def plot_risk_neutral_density(
-    ax: plt.Axes,
+    ax: Axes,
     k_grid: np.ndarray,
     T_grid: np.ndarray,
     params: SSVIParams,

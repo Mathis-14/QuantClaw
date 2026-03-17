@@ -87,8 +87,8 @@ def main(argv: list[str] | None = None) -> int:
         sr = SliceResult(
             expiry=str(vol_slice.expiry),
             T=vol_slice.T,
-            svi_params=svi_p,
-            slice_rmse=svi_slice_rmse(vol_slice, svi_p) if svi_p else None,
+            params=svi_p if svi_p else None,
+            rmse=svi_slice_rmse(vol_slice, svi_p) if svi_p else 0.0,
             status="ok" if svi_p else "failed",
             message=opt.message if not opt.success else "",
         )

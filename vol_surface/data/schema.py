@@ -7,7 +7,11 @@ from typing import List
 
 import numpy as np
 import pandas as pd
+from datetime import date, datetime
 from pydantic import BaseModel, Field
+from typing import List
+from numpy.typing import NDArray
+import pandas as pd  # type: ignore
 
 
 class VolSlice(BaseModel):
@@ -45,7 +49,25 @@ class OptionQuote(BaseModel):
     option_type: str
 
 
+class VolSlice(BaseModel):
+    """Single expiry slice for calibration."""
+    T: float = Field(gt=0)
+    forward: float = Field(gt=0)
+    strikes: List[float]
+    log_moneyness: List[float]
+    total_variance: List[float]
+    implied_vols: List[float]
+    weights: List[float]
+
+
 class OptionChain(BaseModel):
+    """Container for a chain of options (calls/puts) with metadata."""
+    calls: pd.DataFrame  # Standardized on DataFrame for compatibility
+    puts: pd.DataFrame
+    spot: float
+    forward: float
+    maturities: list[date]
+    time_to_maturities: NDArray[np.float64]  # Array of time-to-maturity in years
     """Raw option chain for a single underlying."""
 
     model_config = {"arbitrary_types_allowed": True}
@@ -76,10 +98,40 @@ class OptionChain(BaseModel):
         return [(expiry - today).days / 365.25 for expiry in self.maturities]
 
 
+class SliceResult(BaseModel):
+    """Result of a single expiry slice calibration."""
+    expiry: date | str  # Accept both for flexibility
+    params: "SVIParams | SSVIParams"  # Forward reference
+    rmse: float
+    arbitrage_violations: List[str] = Field(default_factory=list)
+    T: float | None = None  # Time to expiry (years)
+    status: str | None = None  # e.g., "success", "failed"
+    message: str | None = None  # Error message (if any)
+
+
+class VolSurface(BaseModel):
+    """Container for a full volatility surface."""
+    slices: List[SliceResult]
+    spot: float
+    forward: float
+    timestamp: datetime | None = None
+    ticker: str | None = None
+    spot_source: str | None = None
+    options_source: str | None = None
+    maturities: list[date] | None = None
+    ssvi_params: SSVIParams | None = None
+    surface_rmse: float | None = None
+    arbitrage_violations: List[str] = Field(default_factory=list)
+
+
 class SVIParams(BaseModel):
     """SVI parameter set."""
     a: float = Field(gt=0)
     b: float = Field(gt=0)
+    rho: float = Field(ge=-1, le=1)
+    m: float = Field(default=0.0)
+    sigma: float = Field(gt=0)
+    no_arb_lower_bound: float | None = None  # For arbitrage constraint checks
     rho: float = Field(le=0, ge=-1)
     m: float = Field(ge=0)
     sigma: float = Field(gt=0)
