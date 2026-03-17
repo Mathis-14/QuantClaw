@@ -7,7 +7,11 @@ from typing import List
 
 import numpy as np
 import pandas as pd
+from datetime import date, datetime
 from pydantic import BaseModel, Field
+from typing import List
+from numpy.typing import NDArray
+import pandas as pd  # type: ignore
 
 
 class VolSlice(BaseModel):
@@ -46,6 +50,13 @@ class OptionQuote(BaseModel):
 
 
 class OptionChain(BaseModel):
+    """Container for a chain of options (calls/puts) with metadata."""
+    calls: pd.DataFrame  # Standardized on DataFrame for compatibility
+    puts: pd.DataFrame
+    spot: float
+    forward: float
+    maturities: list[date]
+    time_to_maturities: NDArray[np.float64]  # Array of time-to-maturity in years
     """Raw option chain for a single underlying."""
 
     model_config = {"arbitrary_types_allowed": True}
@@ -74,6 +85,27 @@ class OptionChain(BaseModel):
         """Time to maturities in years."""
         today = pd.Timestamp.now().date()
         return [(expiry - today).days / 365.25 for expiry in self.maturities]
+
+
+class SliceResult(BaseModel):
+    """Result of a single expiry slice calibration."""
+    expiry: date | str  # Accept both for flexibility
+    params: "SVIParams | SSVIParams"  # Forward reference
+    rmse: float
+    arbitrage_violations: List[str] = Field(default_factory=list)
+    T: float | None = None  # Time to expiry (years)
+    status: str | None = None  # e.g., "success", "failed"
+    message: str | None = None  # Error message (if any)
+
+
+class VolSurface(BaseModel):
+    """Container for a full volatility surface."""
+    slices: List[SliceResult]
+    spot: float
+    forward: float
+    timestamp: datetime | None = None
+    ticker: str | None = None
+    arbitrage_violations: List[str] = Field(default_factory=list)
 
 
 class SVIParams(BaseModel):

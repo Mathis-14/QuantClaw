@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
+from typing import TypedDict, Union
 from scipy.optimize import least_squares, minimize
 
 from vol_surface.data.schema import SVIParams, SSVIParams, VolSlice
