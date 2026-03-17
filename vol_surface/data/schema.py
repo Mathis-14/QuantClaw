@@ -3,11 +3,32 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import Any, List
 
 import numpy as np
 import pandas as pd
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+class VolSlice(BaseModel):
+    """Volatility slice for a single maturity."""
+    expiry: date
+    T: float = Field(gt=0)
+    forward: float = Field(gt=0)
+    strikes: List[float]
+    log_moneyness: List[float]
+    total_variance: List[float]
+    implied_vols: List[float]
+    weights: List[float]
+    
+    def as_arrays(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Return arrays for calibration."""
+        return (
+            np.array(self.log_moneyness),
+            np.array(self.total_variance),
+            np.array(self.implied_vols),
+            np.array(self.weights),
+        )
 
 
 class OptionQuote(BaseModel):

@@ -8,14 +8,10 @@ This module provides:
 """
 
 from vol_surface.fetcher import OptionChainFetcher, OptionChain
-from vol_surface.calibration import SABR
 from vol_surface.surface import VolatilitySurface
-from vol_surface.visualization import VolatilityVisualizer
 
 __all__ = [
     "OptionChainFetcher",
     "OptionChain",
-    "SABR",
     "VolatilitySurface",
-    "VolatilityVisualizer",
 ]

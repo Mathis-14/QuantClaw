@@ -24,6 +24,7 @@ from vol_surface.models.ssvi import (
     ssvi_initial_guess,
     ssvi_parameter_bounds,
     ssvi_total_variance,
+    check_ssvi_no_arb,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -114,7 +115,7 @@ def calibrate_ssvi_slice(
 def calibrate_ssvi_surface(
     vol_slices: List[VolSlice],
 ) -> Tuple[dict, float]:
-    """Calibrate SSVI for all slices (joint calibration)."""
+    """Calibrate SSVI for all slices (joint calibration) with arbitrage constraints."""
     thetas = [np.mean(slice.total_variance) for slice in vol_slices]
     k_all = np.concatenate([np.array(slice.log_moneyness) for slice in vol_slices])
     w_all = np.concatenate([np.array(slice.total_variance) for slice in vol_slices])
@@ -127,6 +128,26 @@ def calibrate_ssvi_surface(
     def objective(params: np.ndarray) -> float:
         rho, eta, gamma = params
         w_pred = ssvi_total_variance(k_all, theta_all, rho, eta, gamma)
+        
+        # Enforce no-arbitrage conditions
+        if not check_ssvi_no_arb(rho, eta, gamma):
+            return 1e10  # Penalize invalid parameters
+            
+        # Calendar spread arbitrage: Ensure monotonicity in total variance across expiries
+        for i in range(len(vol_slices) - 1):
+            for j in range(i + 1, len(vol_slices)):
+                if thetas[j] < thetas[i]:
+                    return 1e10  # Penalize non-monotonic thetas
+                    
+        # Butterfly arbitrage: Ensure density >= 0 for all slices
+        for slice in vol_slices:
+            k = np.array(slice.log_moneyness)
+            w = ssvi_total_variance(k, np.mean(slice.total_variance), rho, eta, gamma)
+            dw_dk = np.gradient(w, k)
+            d2w_dk2 = np.gradient(dw_dk, k)
+            if np.any(d2w_dk2 < 0):
+                return 1e10  # Penalize negative density
+
         return np.sqrt(np.mean(weights * (w_all - w_pred) ** 2))
 
     p0 = ssvi_initial_guess()

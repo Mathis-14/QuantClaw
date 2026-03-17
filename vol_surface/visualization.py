@@ -1,96 +1,116 @@
-"""
-Diagnostic plots for volatility surfaces and smiles.
-"""
+"""Visualization tools for volatility surfaces and diagnostics."""
 
-from typing import Optional
-import numpy as np
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import Dict, List
+
 import matplotlib.pyplot as plt
-from vol_surface.surface import VolatilitySurface
-import os
+import numpy as np
+import pandas as pd
+from mpl_toolkits.mplot3d import Axes3D
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
-class VolatilityVisualizer:
-    """Generate diagnostic plots for volatility surfaces."""
+def plot_ssvi_smiles(
+    data: pd.DataFrame,
+    params: Dict[str, float],
+    spot_price: float,
+    output_dir: Path,
+    asset: str = "BTC",
+) -> None:
+    """Plot SSVI volatility smiles for all expiries.
 
-    def __init__(self, output_dir: str = "exports/plots"):
-        """
-        Initialize the visualizer.
-
-        Args:
-            output_dir (str): Directory to save plots. Defaults to "exports/plots".
-        """
-        self.output_dir = output_dir
-        os.makedirs(output_dir, exist_ok=True)
-
-    def plot_smile(
-        self,
-        surface: VolatilitySurface,
-        maturity: float,
-        ticker: str = "UNDL",
-    ) -> str:
-        """
-        Plot the volatility smile for a given maturity.
-
-        Args:
-            surface (VolatilitySurface): Volatility surface.
-            maturity (float): Time to maturity (in years).
-            ticker (str): Underlying ticker. Defaults to "UNDL".
-
-        Returns:
-            str: Path to the saved plot.
-        """
-        strikes = surface.option_chain.strikes
-        vols = [surface.volatility(strike, maturity) for strike in strikes]
+    Args:
+        data: DataFrame with options data.
+        params: SSVI parameters (rho, eta, gamma).
+        spot_price: Underlying spot price.
+        output_dir: Directory to save the plot.
+        asset: Asset name (e.g., "BTC").
+    """
+    expiries = pd.to_datetime(data['expiry_date']).dt.date.unique()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    plt.figure(figsize=(12, 8))
+    
+    for expiry in expiries:
+        expiry_df = data[data['expiry_date'].str.contains(expiry.strftime('%Y-%m-%d'))]
+        strikes = expiry_df['strike'].values
+        k = np.log(strikes / spot_price)
+        T = (pd.to_datetime(expiry) - pd.Timestamp.now()).days / 365.25
         
-        plt.figure(figsize=(10, 6))
-        plt.plot(strikes, vols, label=f"Maturity = {maturity:.2f}Y", marker="o")
-        plt.title(f"Volatility Smile for {ticker} (Maturity = {maturity:.2f}Y)")
-        plt.xlabel("Strike")
-        plt.ylabel("Implied Volatility")
-        plt.grid(True)
-        plt.legend()
+        # Market implied vols
+        market_vols = expiry_df['mark_iv'].values
         
-        path = os.path.join(self.output_dir, f"smile_{ticker}_{maturity:.2f}Y.png")
-        plt.savefig(path)
-        plt.close()
+        # SSVI implied vols (placeholder: replace with actual SSVI function)
+        from vol_surface.models.ssvi import ssvi_implied_vol
+        theta = np.mean((market_vols ** 2) * T)
+        ssvi_vols = ssvi_implied_vol(k, T, theta, params['rho'], params['eta'], params['gamma'])
         
-        return path
+        plt.plot(k, market_vols, 'o', label=f'Market {expiry}', alpha=0.5)
+        plt.plot(k, ssvi_vols, '-', label=f'SSVI {expiry}', alpha=0.8)
+    
+    plt.title(f'SSVI Volatility Smiles for {asset}')
+    plt.xlabel('Log-Moneyness (log(K/F))')
+    plt.ylabel('Implied Volatility')
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(output_dir / f'ssvi_smiles_{asset.lower()}_recalibrated.png')
+    plt.close()
+    logger.info(f"SSVI smiles plot saved to {output_dir}")
 
-    def plot_surface(
-        self,
-        surface: VolatilitySurface,
-        ticker: str = "UNDL",
-    ) -> str:
-        """
-        Plot the volatility surface as a heatmap.
 
-        Args:
-            surface (VolatilitySurface): Volatility surface.
-            ticker (str): Underlying ticker. Defaults to "UNDL".
+def plot_ssvi_surface_3d(
+    data: pd.DataFrame,
+    params: Dict[str, float],
+    spot_price: float,
+    output_dir: Path,
+    asset: str = "BTC",
+) -> None:
+    """Plot 3D SSVI surface for total variance.
 
-        Returns:
-            str: Path to the saved plot.
-        """
-        strikes = surface.option_chain.strikes
-        maturities = surface.option_chain.maturities
-        
-        # Create grid
-        strike_grid, maturity_grid = np.meshgrid(strikes, maturities)
-        vol_grid = np.array([
-            [surface.volatility(strike, maturity) for strike in strikes]
-            for maturity in maturities
-        ])
-        
-        plt.figure(figsize=(10, 6))
-        plt.contourf(strike_grid, maturity_grid, vol_grid, levels=20, cmap="viridis")
-        plt.colorbar(label="Implied Volatility")
-        plt.title(f"Volatility Surface for {ticker}")
-        plt.xlabel("Strike")
-        plt.ylabel("Maturity (Y)")
-        plt.grid(True)
-        
-        path = os.path.join(self.output_dir, f"surface_{ticker}.png")
-        plt.savefig(path)
-        plt.close()
-        
-        return path
+    Args:
+        data: DataFrame with options data.
+        params: SSVI parameters (rho, eta, gamma).
+        spot_price: Underlying spot price.
+        output_dir: Directory to save the plot.
+        asset: Asset name (e.g., "BTC").
+    """
+    expiries = pd.to_datetime(data['expiry_date']).dt.date.unique()
+    strikes = np.linspace(50000, 90000, 50)
+    log_moneyness = np.log(strikes / spot_price)
+    
+    # Create meshgrid for 3D plot
+    T_values = [(pd.to_datetime(expiry) - pd.Timestamp.now()).days / 365.25 for expiry in expiries]
+    k_values = log_moneyness
+    T_grid, k_grid = np.meshgrid(T_values, k_values, indexing='ij')
+    
+    # Calculate total variance for each (k, T)
+    from vol_surface.models.ssvi import ssvi_total_variance
+    w_grid = np.zeros_like(T_grid)
+    for i, expiry in enumerate(expiries):
+        theta = np.mean((data[data['expiry_date'].str.contains(expiry.strftime('%Y-%m-%d'))]['mark_iv'] ** 2) * T_values[i])
+        for j, k in enumerate(k_values):
+            w_grid[i, j] = ssvi_total_variance(k, theta, params['rho'], params['eta'], params['gamma'])
+    
+    # Plot 3D surface
+    fig = plt.figure(figsize=(12, 8))
+    ax = fig.add_subplot(111, projection='3d')
+    ax.plot_surface(k_grid, T_grid, w_grid, cmap='viridis', edgecolor='k', alpha=0.7)
+    
+    # Labels and title
+    ax.set_xlabel('Log-Moneyness (log(K/F))')
+    ax.set_ylabel('Time to Maturity (Years)')
+    ax.set_zlabel('Total Variance')
+    ax.set_title(f'3D SSVI Surface for {asset}')
+    
+    # Save plot
+    output_dir.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_dir / f'ssvi_surface_{asset.lower()}_recalibrated.png')
+    plt.close()
+    logger.info(f"3D SSVI surface plot saved to {output_dir}")
