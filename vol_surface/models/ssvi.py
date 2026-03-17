@@ -15,11 +15,16 @@ No-arbitrage conditions:
 
 from __future__ import annotations
 
+import logging
 import numpy as np
 from numpy.typing import NDArray
-from scipy.optimize import minimize
+from scipy.optimize import minimize, differential_evolution
 
 from vol_surface.data.schema import SSVIParams
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def phi_func(theta: float, eta: float, gamma: float) -> float:
@@ -89,6 +94,7 @@ def calibrate_ssvi(
     market_vols: NDArray[np.float64],
     theta: float,
     initial_guess: NDArray[np.float64] | None = None,
+    use_global_optimization: bool = False,
 ) -> tuple[float, float, float]:
     """Calibrate SSVI parameters [rho, eta, gamma] to market implied volatilities.
 
@@ -98,6 +104,7 @@ def calibrate_ssvi(
         market_vols: Market implied volatilities.
         theta: ATM total variance (theta_t).
         initial_guess: Initial guess for [rho, eta, gamma].
+        use_global_optimization: If True, use differential evolution to avoid local minima.
 
     Returns:
         Calibrated [rho, eta, gamma].
@@ -114,12 +121,26 @@ def calibrate_ssvi(
 
     lower, upper = ssvi_parameter_bounds()
     bounds = list(zip(lower, upper))
-    result = minimize(
-        objective,
-        initial_guess,
-        bounds=bounds,
-        method="L-BFGS-B",
-    )
+
+    if use_global_optimization:
+        logger.info("Using differential evolution for global optimization...")
+        result = differential_evolution(
+            objective,
+            bounds,
+            maxiter=100,
+            popsize=15,
+            tol=0.01,
+            polish=True,
+        )
+    else:
+        logger.info("Using L-BFGS-B for constrained optimization...")
+        result = minimize(
+            objective,
+            initial_guess,
+            bounds=bounds,
+            method="L-BFGS-B",
+        )
+
     if not result.success:
         raise RuntimeError(f"SSVI calibration failed: {result.message}")
     return tuple(result.x)

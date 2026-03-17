@@ -20,7 +20,6 @@ from vol_surface.calibration.optimizer import calibrate_ssvi_surface, calibrate_
 from vol_surface.data.cleaner import clean_chain
 from vol_surface.data.fetcher import YFinanceFetcher, resolve_tickers
 from vol_surface.data.schema import (
-    ArbitrageViolation,
     SSVIParams,
     SVIParams,
     SliceResult,
@@ -108,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # SSVI calibration
     ssvi_params: SSVIParams | None = None
-    ssvi_opt = None
+
     surface_rmse_val = None
     ssvi_ci: dict[str, tuple[float, float]] = {}
 
@@ -118,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
         if len(valid_slices) >= 2:
             logger.info("Calibrating SSVI surface...")
             ssvi_params, ssvi_opt_result = calibrate_ssvi_surface(valid_slices, valid_thetas)
-            ssvi_opt = ssvi_opt_result
+
             if ssvi_params:
                 surface_rmse_val = ssvi_surface_rmse(valid_slices, valid_thetas, ssvi_params)
                 logger.info("SSVI: rho=%.4f eta=%.4f gamma=%.4f  RMSE=%.6f",

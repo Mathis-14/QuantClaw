@@ -1,7 +1,6 @@
 """Calibration utilities for volatility models."""
 
 from typing import Optional
-import numpy as np
 import pandas as pd
 from vol_surface.fetcher import OptionChain, OptionQuote
 
