@@ -240,6 +240,7 @@ def calibrate_ssvi_surface(
 
     try:
         ssvi_params = SSVIParams(
+            theta=atm_total_vars[0],  # Use the first ATM total variance as a placeholder
             rho=float(best.params[0]),
             eta=float(best.params[1]),
             gamma=float(best.params[2]),

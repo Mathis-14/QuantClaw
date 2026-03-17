@@ -7,8 +7,8 @@ import numpy as np
 import pandas as pd
 from scipy.interpolate import RectBivariateSpline
 from vol_surface.fetcher import OptionChain
-from vol_surface.models.svi import svi_implied_vol, svi_total_variance
-from vol_surface.models.ssvi import ssvi_implied_vol, ssvi_total_variance, calibrate_ssvi
+from vol_surface.models.svi import svi_implied_vol
+from vol_surface.models.ssvi import ssvi_implied_vol, calibrate_ssvi
 
 
 class VolatilitySurface:
@@ -77,12 +77,12 @@ class VolatilitySurface:
         svi_params = {}
         for maturity in maturities:
             calls = self.option_chain.calls_df[self.option_chain.calls_df["expiry_date"] == maturity]
-            puts = self.option_chain.puts_df[self.option_chain.puts_df["expiry_date"] == maturity]
+# puts = self.option_chain.puts_df[self.option_chain.puts_df["expiry_date"] == maturity]  # Unused (puts not needed for calibration)
 
             # Use calls for calibration (puts are similar)
-            market_vols = calls["impliedVolatility"].values
+# market_vols = calls["impliedVolatility"].values  # Unused (implied vols not needed here)
             k = np.log(calls["strike"].values / self.forward)
-            w = market_vols**2 * maturity
+# w = market_vols**2 * maturity  # Unused (total variance not needed here)
 
             # Calibrate SVI (placeholder: use existing SVI calibration logic)
             # For now, use dummy parameters; replace with actual calibration
@@ -104,7 +104,7 @@ class VolatilitySurface:
         ssvi_params = {}
         for i, maturity in enumerate(self.option_chain.time_to_maturities):
             calls = self.option_chain.calls_df[self.option_chain.calls_df["expiry_date"] == pd.to_datetime(self.option_chain.maturities[i])]
-            puts = self.option_chain.puts_df[self.option_chain.puts_df["expiry_date"] == pd.to_datetime(self.option_chain.maturities[i])] if not self.option_chain.puts_df.empty else None
+# puts = self.option_chain.puts_df[self.option_chain.puts_df["expiry_date"] == pd.to_datetime(self.option_chain.maturities[i])]  # Unused if not self.option_chain.puts_df.empty else None
 
             # Use calls for calibration (puts are similar)
             market_vols = calls["impliedVolatility"].values

@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import logging
 from datetime import date, timedelta
-from pathlib import Path
 
 import numpy as np
 import pytest
 
-from vol_surface.data.schema import SSVIParams, VolSlice
+from vol_surface.data.schema import VolSlice
 from vol_surface.calibration.verification import (
     recalibrate_ssvi_with_constraints,
     validate_ssvi_calibration,

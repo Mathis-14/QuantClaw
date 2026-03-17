@@ -8,7 +8,7 @@ This module provides:
 
 import sqlite3
 import os
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional
 import numpy as np
 import pandas as pd
 import yfinance as yf
