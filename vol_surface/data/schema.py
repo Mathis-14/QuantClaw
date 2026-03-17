@@ -49,6 +49,17 @@ class OptionQuote(BaseModel):
     option_type: str
 
 
+class VolSlice(BaseModel):
+    """Single expiry slice for calibration."""
+    T: float = Field(gt=0)
+    forward: float = Field(gt=0)
+    strikes: List[float]
+    log_moneyness: List[float]
+    total_variance: List[float]
+    implied_vols: List[float]
+    weights: List[float]
+
+
 class OptionChain(BaseModel):
     """Container for a chain of options (calls/puts) with metadata."""
     calls: pd.DataFrame  # Standardized on DataFrame for compatibility
@@ -105,6 +116,11 @@ class VolSurface(BaseModel):
     forward: float
     timestamp: datetime | None = None
     ticker: str | None = None
+    spot_source: str | None = None
+    options_source: str | None = None
+    maturities: list[date] | None = None
+    ssvi_params: SSVIParams | None = None
+    surface_rmse: float | None = None
     arbitrage_violations: List[str] = Field(default_factory=list)
 
 
@@ -112,6 +128,10 @@ class SVIParams(BaseModel):
     """SVI parameter set."""
     a: float = Field(gt=0)
     b: float = Field(gt=0)
+    rho: float = Field(ge=-1, le=1)
+    m: float = Field(default=0.0)
+    sigma: float = Field(gt=0)
+    no_arb_lower_bound: float | None = None  # For arbitrage constraint checks
     rho: float = Field(le=0, ge=-1)
     m: float = Field(ge=0)
     sigma: float = Field(gt=0)

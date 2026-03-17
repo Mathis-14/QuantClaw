@@ -66,7 +66,7 @@ def calibrate_svi_slice(
     # Fine grid for butterfly penalty — span the fitted range plus a small buffer
     k_fine = np.linspace(float(k.min()) - 0.05, float(k.max()) + 0.05, 200)
 
-    def residuals(x: NDArray) -> NDArray:
+    def residuals(x: NDArray[np.float64]) -> NDArray[np.float64]:
         # 1) Weighted total-variance fit residuals
         w_model = svi_total_variance(k, *x)
         res_fit = np.sqrt(weights) * (w_model - w)
@@ -152,9 +152,9 @@ def calibrate_svi_slice(
         logger.error("Invalid SVI params: %s", exc)
         return None, best
 
-    if svi_params.no_arb_lower_bound() < -1e-8:
+    if svi_params.no_arb_lower_bound and svi_params.no_arb_lower_bound < -1e-8:
         logger.warning(
-            "SVI no-arb lower bound violated: %.6f", svi_params.no_arb_lower_bound()
+            "SVI no-arb lower bound violated: %.6f", svi_params.no_arb_lower_bound
         )
 
     return svi_params, best
@@ -188,7 +188,7 @@ def calibrate_ssvi_surface(
     # Fix 6: use tighter equity-specific bounds (defined in ssvi.py).
     lower, upper = ssvi_parameter_bounds()
 
-    def objective(x: NDArray) -> float:
+    def objective(x: NDArray[np.float64]) -> float:
         rho, eta, gamma = x
         w_model = np.empty_like(k_all)
         idx = 0
@@ -198,7 +198,7 @@ def calibrate_ssvi_surface(
             idx += n
         return float(np.sum(wt_all * (w_model - w_all) ** 2))
 
-    def constraint_no_arb(x: NDArray) -> float:
+    def constraint_no_arb(x: NDArray[np.float64]) -> float:
         return 4.0 - x[1] * (1 + abs(x[0]))
 
     best: OptResult | None = None
