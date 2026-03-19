@@ -8,10 +8,7 @@ from pydantic import ValidationError
 
 from vol_surface.data.schema import SVIParams, VolSlice
 from vol_surface.models.svi import (
-    svi_initial_guess,
-    svi_parameter_bounds,
     svi_total_variance,
-    svi_implied_vol,
     vector_to_params,
     params_to_vector,
 )
@@ -27,7 +24,7 @@ class TestSVIParametricConstraints:
         assert svi_params_valid.sigma > 0
 
     def test_no_arb_lower_bound_satisfied(self, svi_params_valid: SVIParams):
-        assert svi_params_valid.no_arb_lower_bound() >= 0
+        assert svi_params_valid.no_arb_lower_bound >= 0
 
     def test_negative_b_rejected(self):
         with pytest.raises(ValidationError):
@@ -50,7 +47,7 @@ class TestSVIParametricConstraints:
     def test_no_arb_violation_detectable(self):
         """Params that violate a + b*sigma*sqrt(1-rho^2) >= 0."""
         p = SVIParams(a=-0.5, b=0.01, rho=0.0, m=0.0, sigma=0.01)
-        assert p.no_arb_lower_bound() < 0
+        assert p.no_arb_lower_bound < 0
 
 
 class TestSVIFunction:
@@ -99,7 +96,7 @@ class TestSVICalibration:
         # Fitted curve must reproduce market total variance to < 1e-6
         assert svi_slice_rmse(synthetic_svi_slice, svi_p) < 1e-6
         # Arbitrage constraint: a + b*sigma >= 0
-        assert svi_p.no_arb_lower_bound() >= -1e-8
+        assert svi_p.no_arb_lower_bound >= -1e-8
 
     def test_noisy_recovery(self, synthetic_svi_slice: VolSlice, svi_params_valid: SVIParams):
         """Add noise and verify calibration fits the noisy slice well."""

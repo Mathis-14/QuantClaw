@@ -19,12 +19,7 @@ from vol_surface.calibration.diagnostics import (
 from vol_surface.calibration.optimizer import calibrate_ssvi_surface, calibrate_svi_slice
 from vol_surface.data.cleaner import clean_chain
 from vol_surface.data.fetcher import YFinanceFetcher, resolve_tickers
-from vol_surface.data.schema import (
-    SSVIParams,
-    SVIParams,
-    SliceResult,
-    VolSurface,
-)
+from vol_surface.data.schema import SSVIParams, SVIParams, SliceResult, VolSurface
 from vol_surface.models.arbitrage import run_all_checks
 from vol_surface.models.svi import svi_total_variance
 from vol_surface.output.report import save_report
@@ -87,8 +82,8 @@ def main(argv: list[str] | None = None) -> int:
         sr = SliceResult(
             expiry=str(vol_slice.expiry),
             T=vol_slice.T,
-            params=svi_p if svi_p else None,
-            rmse=svi_slice_rmse(vol_slice, svi_p) if svi_p else 0.0,
+            svi_params=svi_p,
+            slice_rmse=svi_slice_rmse(vol_slice, svi_p) if svi_p else None,
             status="ok" if svi_p else "failed",
             message=opt.message if not opt.success else "",
         )
@@ -107,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # SSVI calibration
     ssvi_params: SSVIParams | None = None
-
+    ssvi_opt = None
     surface_rmse_val = None
     ssvi_ci: dict[str, tuple[float, float]] = {}
 
@@ -117,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
         if len(valid_slices) >= 2:
             logger.info("Calibrating SSVI surface...")
             ssvi_params, ssvi_opt_result = calibrate_ssvi_surface(valid_slices, valid_thetas)
-
+            ssvi_opt = ssvi_opt_result
             if ssvi_params:
                 surface_rmse_val = ssvi_surface_rmse(valid_slices, valid_thetas, ssvi_params)
                 logger.info("SSVI: rho=%.4f eta=%.4f gamma=%.4f  RMSE=%.6f",
@@ -148,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
     spot_source, options_source = resolve_tickers(args.ticker)
 
     vol_surface = VolSurface(
-        timestamp=datetime.utcnow().isoformat(),
+        timestamp=datetime.now().isoformat(),
         ticker=args.ticker,
         spot=chain.spot,
         spot_source=spot_source,
