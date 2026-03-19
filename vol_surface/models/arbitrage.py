@@ -11,6 +11,8 @@ from vol_surface.data.schema import ArbitrageViolation
 
 logger = logging.getLogger(__name__)
 
+SliceSpec = tuple[str, float, NDArray[np.float64], NDArray[np.float64]]
+
 
 def check_butterfly(
     strikes: NDArray[np.float64],
@@ -18,7 +20,7 @@ def check_butterfly(
     expiry_label: str,
     tol: float = -1e-8,
 ) -> list[ArbitrageViolation]:
-    """Butterfly arbitrage: d^2 w / dk^2 >= 0 (convexity of total variance in strike).
+    """Butterfly arbitrage: d^2 w / dK^2 >= 0 (convexity in strike).
 
     Approximated by finite differences on the strike grid.
     """
@@ -50,36 +52,29 @@ def check_butterfly(
 
 
 def check_calendar(
-    slices: list[tuple[str, float, NDArray[np.float64], NDArray[np.float64]]],
+    slices: list[SliceSpec],
     tol: float = -1e-8,
 ) -> list[ArbitrageViolation]:
-    """Calendar spread arbitrage: total variance must be non-decreasing in T
-    at every strike.
+    """Calendar spread arbitrage: total variance must be non-decreasing in T.
 
-    *slices* is a list of (expiry_label, T, strikes, total_variance) sorted by T.
-    We interpolate onto a common strike grid and check monotonicity.
+    Interpolates onto a common strike grid and checks monotonicity.
     """
     violations: list[ArbitrageViolation] = []
     if len(slices) < 2:
         return violations
 
     slices_sorted = sorted(slices, key=lambda s: s[1])
+    all_strikes = np.sort(np.unique(np.concatenate([s[2] for s in slices_sorted])))
 
-    all_strikes = np.sort(
-        np.unique(np.concatenate([s[2] for s in slices_sorted]))
-    )
-
-    interp_tvars: list[tuple[str, float, NDArray[np.float64]]] = []
+    interp: list[tuple[str, float, NDArray[np.float64]]] = []
     for label, T, strikes, tvar in slices_sorted:
-        w_interp = np.interp(all_strikes, strikes, tvar)
-        interp_tvars.append((label, T, w_interp))
+        interp.append((label, T, np.interp(all_strikes, strikes, tvar)))
 
-    for i in range(1, len(interp_tvars)):
-        label_prev, T_prev, w_prev = interp_tvars[i - 1]
-        label_cur, T_cur, w_cur = interp_tvars[i]
+    for i in range(1, len(interp)):
+        _, _, w_prev = interp[i - 1]
+        label_cur, _, w_cur = interp[i]
         diff = w_cur - w_prev
-        mask = diff < tol
-        for j in np.where(mask)[0]:
+        for j in np.where(diff < tol)[0]:
             violations.append(
                 ArbitrageViolation(
                     type="calendar",
@@ -92,15 +87,14 @@ def check_calendar(
 
 
 def run_all_checks(
-    slices: list[tuple[str, float, NDArray[np.float64], NDArray[np.float64]]],
+    slices: list[SliceSpec],
     tol: float = -1e-8,
     min_severity: float = 1e-5,
 ) -> list[ArbitrageViolation]:
     """Run butterfly + calendar checks and return all violations.
 
-    Fix 5: violations with severity < min_severity are filtered out as
-    float64 rounding artefacts.  On a clean SVI surface these appear with
-    severity ~1e-8.  Real butterfly violations have severity > 1e-4.
+    Violations with severity < *min_severity* are filtered out as float64
+    rounding artefacts (clean SVI surfaces produce ~1e-8 noise).
     """
     violations: list[ArbitrageViolation] = []
     for label, T, strikes, tvar in slices:

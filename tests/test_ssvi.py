@@ -11,7 +11,6 @@ from vol_surface.models.ssvi import (
     check_ssvi_no_arb,
     phi_func,
     ssvi_total_variance,
-    ssvi_implied_vol,
 )
 from vol_surface.calibration.optimizer import calibrate_ssvi_surface
 

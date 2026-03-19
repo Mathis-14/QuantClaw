@@ -1,4 +1,4 @@
-"""Pydantic v2 schemas for option chain data and calibration results."""
+"""Pydantic v2 schemas for option-chain data and calibration results."""
 
 from __future__ import annotations
 
@@ -6,7 +6,10 @@ from datetime import date, datetime
 from typing import Any
 
 import numpy as np
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, model_validator
+
+
+# ── Market data ─────────────────────────────────────────────────────────────
 
 
 class OptionQuote(BaseModel):
@@ -23,7 +26,7 @@ class OptionQuote(BaseModel):
     option_type: str = Field(pattern=r"^(call|put)$")
 
     @model_validator(mode="after")
-    def bid_leq_ask(self) -> OptionQuote:
+    def _bid_leq_ask(self) -> OptionQuote:
         if self.bid > self.ask:
             raise ValueError(f"bid ({self.bid}) > ask ({self.ask})")
         return self
@@ -53,7 +56,7 @@ class VolSlice(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
     @model_validator(mode="after")
-    def consistent_lengths(self) -> VolSlice:
+    def _consistent_lengths(self) -> VolSlice:
         n = len(self.strikes)
         for name in ("log_moneyness", "total_variance", "implied_vols", "weights"):
             if len(getattr(self, name)) != n:
@@ -70,6 +73,9 @@ class VolSlice(BaseModel):
         )
 
 
+# ── Model parameters ────────────────────────────────────────────────────────
+
+
 class SVIParams(BaseModel):
     """Raw SVI parameters for a single slice."""
 
@@ -79,15 +85,9 @@ class SVIParams(BaseModel):
     m: float
     sigma: float = Field(gt=0)
 
-    @field_validator("b")
-    @classmethod
-    def b_nonneg(cls, v: float) -> float:
-        if v < 0:
-            raise ValueError("b must be non-negative")
-        return v
-
+    @property
     def no_arb_lower_bound(self) -> float:
-        """a + b*sigma*sqrt(1 - rho^2) must be >= 0."""
+        """a + b * sigma * sqrt(1 - rho^2) >= 0 is required for no-arbitrage."""
         return self.a + self.b * self.sigma * np.sqrt(1 - self.rho**2)
 
 
@@ -99,12 +99,14 @@ class SSVIParams(BaseModel):
     gamma: float = Field(gt=0, le=1)
 
     @model_validator(mode="after")
-    def no_arb_condition(self) -> SSVIParams:
-        if self.eta * (1 + abs(self.rho)) > 4:
-            raise ValueError(
-                f"No-arb violated: eta*(1+|rho|)={self.eta*(1+abs(self.rho)):.4f} > 4"
-            )
+    def _no_arb_condition(self) -> SSVIParams:
+        lhs = self.eta * (1 + abs(self.rho))
+        if lhs > 4:
+            raise ValueError(f"No-arb violated: eta*(1+|rho|) = {lhs:.4f} > 4")
         return self
+
+
+# ── Calibration output ──────────────────────────────────────────────────────
 
 
 class SliceResult(BaseModel):

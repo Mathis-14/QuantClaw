@@ -58,7 +58,7 @@ class TestSVIRoundTrip:
         max_rmse = max(1e-6, noise_std * 5)  # scale tolerance with noise
         assert rmse < max_rmse, f"RMSE {rmse:.2e} > tolerance {max_rmse:.2e}"
         # No static arbitrage in the fitted curve
-        assert recovered.no_arb_lower_bound() >= -1e-8
+        assert recovered.no_arb_lower_bound >= -1e-8
 
 
 class TestSSVIRoundTrip:

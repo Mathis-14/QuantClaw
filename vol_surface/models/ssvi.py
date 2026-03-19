@@ -5,12 +5,8 @@ Parametrization:
 
 where:
     phi(theta) = eta / (theta^gamma * (1 + theta)^(1 - gamma))
-    theta_t = ATM total variance at maturity t
 
-No-arbitrage conditions:
-    0 < gamma <= 1
-    eta > 0
-    eta * (1 + |rho|) <= 4
+No-arbitrage conditions:  0 < gamma <= 1,  eta > 0,  eta*(1+|rho|) <= 4.
 """
 
 from __future__ import annotations
@@ -48,15 +44,16 @@ def ssvi_implied_vol(
     gamma: float,
 ) -> NDArray[np.float64]:
     """Implied vol from SSVI."""
-    w = ssvi_total_variance(k, theta, rho, eta, gamma)
-    w = np.maximum(w, 1e-10)
+    w = np.maximum(ssvi_total_variance(k, theta, rho, eta, gamma), 1e-10)
     return np.sqrt(w / T)
 
 
-def ssvi_from_params(
-    params: SSVIParams,
-) -> dict[str, float]:
-    return dict(rho=params.rho, eta=params.eta, gamma=params.gamma)
+def check_ssvi_no_arb(rho: float, eta: float, gamma: float) -> bool:
+    """Return True if SSVI no-arbitrage conditions are satisfied."""
+    return 0 < gamma <= 1 and eta > 0 and eta * (1 + abs(rho)) <= 4
+
+
+# ── Initial guess & bounds ──────────────────────────────────────────────────
 
 
 def ssvi_initial_guess() -> NDArray[np.float64]:
@@ -65,26 +62,15 @@ def ssvi_initial_guess() -> NDArray[np.float64]:
 
 
 def ssvi_parameter_bounds() -> tuple[list[float], list[float]]:
-    """Return (lower, upper) bounds for [rho, eta, gamma].
+    """(lower, upper) bounds for [rho, eta, gamma].
 
-    Fix 6: equity-specific hard bounds.
-    - rho: restricted to (-0.95, 0.0) — equity skew is always negative.
-    - eta: (0.05, 1.5) — prevents near-zero (flat surface) and explosions.
-    - gamma: (0.1, 0.9) — keeps the power-law decay well-conditioned.
-    These are strictly inside the mathematical no-arb region
-    (eta*(1+|rho|) <= 4), so the Pydantic validator is never triggered.
+    Equity-specific:
+    - rho in (-0.95, 0.0)  — equity skew is always negative.
+    - eta in (0.05, 1.5)   — avoids flat-surface and explosions.
+    - gamma in (0.1, 0.9)  — keeps power-law decay well-conditioned.
+
+    Strictly inside the mathematical no-arb region eta*(1+|rho|) <= 4.
     """
     lower = [-0.95, 0.05, 0.10]
     upper = [0.00,  1.50, 0.90]
     return lower, upper
-
-
-def check_ssvi_no_arb(rho: float, eta: float, gamma: float) -> bool:
-    """Return True if SSVI no-arbitrage conditions are satisfied."""
-    if gamma <= 0 or gamma > 1:
-        return False
-    if eta <= 0:
-        return False
-    if eta * (1 + abs(rho)) > 4:
-        return False
-    return True

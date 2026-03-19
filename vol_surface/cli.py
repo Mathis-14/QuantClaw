@@ -19,13 +19,7 @@ from vol_surface.calibration.diagnostics import (
 from vol_surface.calibration.optimizer import calibrate_ssvi_surface, calibrate_svi_slice
 from vol_surface.data.cleaner import clean_chain
 from vol_surface.data.fetcher import YFinanceFetcher, resolve_tickers
-from vol_surface.data.schema import (
-    ArbitrageViolation,
-    SSVIParams,
-    SVIParams,
-    SliceResult,
-    VolSurface,
-)
+from vol_surface.data.schema import SSVIParams, SVIParams, SliceResult, VolSurface
 from vol_surface.models.arbitrage import run_all_checks
 from vol_surface.models.svi import svi_total_variance
 from vol_surface.output.report import save_report
@@ -149,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
     spot_source, options_source = resolve_tickers(args.ticker)
 
     vol_surface = VolSurface(
-        timestamp=datetime.utcnow().isoformat(),
+        timestamp=datetime.now().isoformat(),
         ticker=args.ticker,
         spot=chain.spot,
         spot_source=spot_source,
