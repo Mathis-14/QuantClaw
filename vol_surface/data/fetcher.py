@@ -32,8 +32,11 @@ def resolve_tickers(logical_ticker: str) -> tuple[str, str]:
 
     Examples: "SPX" -> ("^SPX", "SPY"),  "SPY" -> ("SPY", "SPY").
     """
-    spot_ticker = TICKER_MAP.get(logical_ticker, logical_ticker)
-    options_ticker = OPTIONS_PROXY_MAP.get(logical_ticker, spot_ticker)
+    key = logical_ticker.upper()
+    # Accept aliases such as "spx" and "^SPX".
+    canonical = key[1:] if key.startswith("^") else key
+    spot_ticker = TICKER_MAP.get(canonical, logical_ticker)
+    options_ticker = OPTIONS_PROXY_MAP.get(canonical, spot_ticker)
     return spot_ticker, options_ticker
 
 
